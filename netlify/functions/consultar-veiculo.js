@@ -22,102 +22,111 @@ function resposta(statusCode, body) {
   };
 }
 
-function filtrarDadosSensiveis(dados) {
-  const fonte = Array.isArray(dados) ? dados[0] || {} : dados || {};
+function moedaBRL(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+
+  const numero = Number(valor);
+  if (Number.isNaN(numero)) return String(valor);
+
+  return numero.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+}
+
+function separarMarcaModelo(marcaModelo) {
+  if (!marcaModelo) {
+    return { brand: null, model: null };
+  }
+
+  const texto = String(marcaModelo).trim();
+  const partes = texto.split("/");
+
+  if (partes.length >= 2) {
+    return {
+      brand: partes[0].trim() || null,
+      model: partes.slice(1).join("/").trim() || null
+    };
+  }
 
   return {
-    plate: fonte.placa || fonte.plate || null,
-    brand: fonte.marca || fonte.brand || null,
-    model: fonte.modelo || fonte.model || null,
-    year_manufacture: fonte.anoFabricacao || fonte.ano_fabricacao || fonte.year_manufacture || null,
-    year_model: fonte.anoModelo || fonte.ano_modelo || fonte.year_model || null,
-    color: fonte.cor || fonte.color || null,
-    category: fonte.categoria || fonte.category || null,
-    vehicle_type: fonte.tipoVeiculo || fonte.tipo_veiculo || fonte.especie || fonte.vehicle_type || null,
-    fuel: fonte.combustivel || fonte.fuel || null,
-    city: fonte.municipio || fonte.city || null,
-    state: fonte.uf || fonte.state || null,
-    situacao_basica: fonte.situacaoBasica || fonte.situacao_basica || null,
-    restricoes_publicas: fonte.restricoesPublicas || fonte.restricoes_publicas || null
+    brand: null,
+    model: texto || null
   };
 }
 
-async function obterTokenSerpro() {
-  const tokenUrl = process.env.SERPRO_TOKEN_URL || "https://gateway.apiserpro.serpro.gov.br/token";
-  const consumerKey = process.env.SERPRO_CONSUMER_KEY;
-  const consumerSecret = process.env.SERPRO_CONSUMER_SECRET;
-  const accessTokenManual = process.env.SERPRO_ACCESS_TOKEN;
+function mapearRespostaFipeApi(dados) {
+  const data = dados && dados.data ? dados.data : {};
+  const veiculo = data.veiculo || {};
+  const fipes = Array.isArray(data.fipes) ? data.fipes : [];
+  const primeiraFipe = fipes[0] || {};
+  const marcaModelo = separarMarcaModelo(veiculo.marca_modelo || primeiraFipe.marca_modelo);
 
-  if (accessTokenManual) {
-    return accessTokenManual;
-  }
+  const vehicle = {
+    plate: veiculo.placa || null,
+    brand: primeiraFipe.marca || marcaModelo.brand || null,
+    model: primeiraFipe.modelo || marcaModelo.model || null,
+    year_manufacture: veiculo.ano ? String(veiculo.ano).split("/")[0] || null : null,
+    year_model: veiculo.ano ? String(veiculo.ano).split("/")[1] || String(veiculo.ano).split("/")[0] || null : null,
+    color: veiculo.cor || null,
+    category: null,
+    vehicle_type: veiculo.tipo_de_veiculo || null,
+    fuel: veiculo.combustivel || null,
+    city: veiculo.municipio || null,
+    state: veiculo.uf || null,
+    situacao_basica: null,
+    restricoes_publicas: null
+  };
 
-  if (!consumerKey || !consumerSecret) {
-    throw new Error("SERPRO_AUTH_NOT_CONFIGURED");
-  }
+  const fipe = {
+    code: primeiraFipe.codigo || null,
+    value: moedaBRL(primeiraFipe.valor),
+    raw_value: primeiraFipe.valor || null,
+    brand: primeiraFipe.marca || null,
+    model: primeiraFipe.modelo || null,
+    brand_model: primeiraFipe.marca_modelo || null,
+    type: primeiraFipe.tipo || null,
+    model_year_id: primeiraFipe.id_modelo_ano || null,
+    reference_month: null,
+    version_confirmed: fipes.length === 1,
+    options_count: fipes.length,
+    options: fipes.slice(0, 5).map((item) => ({
+      code: item.codigo || null,
+      value: moedaBRL(item.valor),
+      raw_value: item.valor || null,
+      brand: item.marca || null,
+      model: item.modelo || null,
+      brand_model: item.marca_modelo || null,
+      model_year_id: item.id_modelo_ano || null
+    }))
+  };
 
-  const basicToken = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
-
-  const response = await fetch(tokenUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${basicToken}`,
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: "grant_type=client_credentials"
-  });
-
-  if (!response.ok) {
-    throw new Error("SERPRO_TOKEN_ERROR");
-  }
-
-  const data = await response.json();
-
-  if (!data.access_token) {
-    throw new Error("SERPRO_TOKEN_ERROR");
-  }
-
-  return data.access_token;
+  return { vehicle, fipe };
 }
 
-async function consultarSerproSenatran(placa) {
-  const baseUrl = process.env.SERPRO_VEHICLE_BASE_URL || process.env.SERPRO_BASE_URL;
-  const pathTemplate = process.env.SERPRO_VEHICLE_PATH || "/veiculos/placa/{placa}";
+async function consultarFipeApiPorPlaca(placa) {
+  const apiKey = process.env.FIPEAPI_KEY;
+  const baseUrl = process.env.FIPEAPI_BASE_URL || "https://placas.fipeapi.com.br";
 
-  if (!baseUrl) {
-    throw new Error("SERPRO_ENDPOINT_NOT_CONFIGURED");
+  if (!apiKey) {
+    throw new Error("FIPEAPI_NOT_CONFIGURED");
   }
 
-  const token = await obterTokenSerpro();
-  const path = pathTemplate.replace("{placa}", encodeURIComponent(placa));
-  const endpoint = `${baseUrl.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/placas/${encodeURIComponent(placa)}?key=${encodeURIComponent(apiKey)}`;
 
   const response = await fetch(endpoint, {
     method: "GET",
     headers: {
-      "Authorization": `Bearer ${token}`,
       "Accept": "application/json"
     }
   });
 
   if (!response.ok) {
-    throw new Error("SENATRAN_UNAVAILABLE");
+    throw new Error("FIPEAPI_UNAVAILABLE");
   }
 
-  return response.json();
-}
-
-async function consultarFipe(vehicle) {
-  // A consulta FIPE depende da correspondencia entre marca, modelo, ano e versao.
-  // Este ponto esta preparado para integrar BrasilAPI, API FIPE ou outro provedor contratado.
-  // Se houver multiplas versoes compativeis, retorne MULTIPLE_FIPE_VERSIONS para o assistente pedir confirmacao ao cliente.
-  return {
-    code: null,
-    value: null,
-    reference_month: null,
-    version_confirmed: false,
-    warning: "FIPE_MATCH_REQUIRED"
-  };
+  const dados = await response.json();
+  return mapearRespostaFipeApi(dados);
 }
 
 exports.handler = async function(event) {
@@ -154,46 +163,40 @@ exports.handler = async function(event) {
       });
     }
 
-    const dadosSerpro = await consultarSerproSenatran(placa);
-    const vehicle = filtrarDadosSensiveis(dadosSerpro);
-    const fipe = await consultarFipe(vehicle);
+    const { vehicle, fipe } = await consultarFipeApiPorPlaca(placa);
 
     return resposta(200, {
       success: true,
-      source: "SERPRO/SENATRAN + FIPE",
+      source: "FipeAPI por placa",
       vehicle,
       fipe,
+      warning: fipe.options_count > 1 ? "MULTIPLE_FIPE_VERSIONS" : null,
       privacy: {
-        sensitive_data_removed: true
+        sensitive_data_removed: true,
+        hidden_fields: [
+          "chassi",
+          "n_motor",
+          "renavam",
+          "proprietario",
+          "cpf",
+          "endereco"
+        ]
       }
     });
   } catch (error) {
-    const errosConfiguracao = [
-      "SERPRO_AUTH_NOT_CONFIGURED",
-      "SERPRO_ENDPOINT_NOT_CONFIGURED"
-    ];
-
-    if (errosConfiguracao.includes(error.message)) {
+    if (error.message === "FIPEAPI_NOT_CONFIGURED") {
       return resposta(500, {
         success: false,
-        error: error.message,
-        message: "Configuracao SERPRO/SENATRAN incompleta. Verifique variaveis de ambiente."
+        error: "FIPEAPI_NOT_CONFIGURED",
+        message: "Chave da FipeAPI nao configurada. Verifique a variavel FIPEAPI_KEY."
       });
     }
 
-    if (error.message === "SERPRO_TOKEN_ERROR") {
-      return resposta(502, {
-        success: false,
-        error: "SERPRO_TOKEN_ERROR",
-        message: "Falha ao autenticar no gateway SERPRO."
-      });
-    }
-
-    if (error.message === "SENATRAN_UNAVAILABLE") {
+    if (error.message === "FIPEAPI_UNAVAILABLE") {
       return resposta(503, {
         success: false,
-        error: "SENATRAN_UNAVAILABLE",
-        message: "Consulta veicular indisponivel no momento."
+        error: "FIPEAPI_UNAVAILABLE",
+        message: "Consulta FipeAPI indisponivel no momento."
       });
     }
 
