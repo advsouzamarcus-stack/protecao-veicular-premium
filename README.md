@@ -1,6 +1,6 @@
 # Protecao Veicular Premium - Consultor Julio Beraka
 
-Assistente virtual para atendimento de protecao veicular, com integracao para WhatsApp, fluxo de consentimento, validacao de placa, backend seguro para SERPRO/SENATRAN e estrutura complementar para FIPE.
+Assistente virtual para atendimento de protecao veicular, com integracao para WhatsApp, fluxo de consentimento, validacao de placa e backend seguro para consulta FipeAPI por placa.
 
 ## WhatsApp de atendimento
 
@@ -8,7 +8,15 @@ Assistente virtual para atendimento de protecao veicular, com integracao para Wh
 
 ## Objetivo
 
-Permitir que o cliente envie a placa do veiculo, autorize a consulta e receba confirmacao dos dados basicos do automovel para cotacao, analise de protecao veicular e agendamento com o Consultor Julio Beraka.
+Permitir que o cliente envie a placa do veiculo, autorize a consulta e receba confirmacao dos dados basicos do automovel e valor FIPE aproximado para cotacao, analise de protecao veicular e agendamento com o Consultor Julio Beraka.
+
+## Fonte da consulta
+
+A consulta principal esta configurada para FipeAPI por placa:
+
+https://placas.fipeapi.com.br/placas/{placa}?key={apikey}
+
+A chave deve ficar apenas no backend, em variavel de ambiente.
 
 ## Fluxo operacional
 
@@ -18,9 +26,9 @@ Permitir que o cliente envie a placa do veiculo, autorize a consulta e receba co
 4. Cliente informa a placa.
 5. Sistema solicita consentimento.
 6. Backend valida e normaliza a placa.
-7. Backend consulta SERPRO/SENATRAN.
+7. Backend consulta FipeAPI por placa.
 8. Backend remove ou oculta dados sensiveis.
-9. Backend consulta FIPE ou retorna aviso para confirmacao de versao.
+9. Backend retorna dados basicos do veiculo e possivel valor FIPE.
 10. Assistente confirma os dados com o cliente.
 11. Cliente e direcionado ao WhatsApp do Consultor Julio Beraka.
 
@@ -32,14 +40,13 @@ Permitir que o cliente envie a placa do veiculo, autorize a consulta e receba co
 - ano de fabricacao
 - ano modelo
 - cor
-- categoria
-- especie
 - tipo de veiculo
 - municipio
 - UF
 - combustivel
-- situacao basica
-- restricoes publicas, se permitido pela contratacao
+- codigo FIPE
+- valor FIPE aproximado
+- opcoes FIPE compativeis, quando houver mais de uma versao
 
 ## Campos proibidos
 
@@ -50,6 +57,7 @@ O sistema nao deve exibir:
 - endereco
 - RENAVAM completo
 - chassi completo
+- numero do motor
 - dados financeiros
 - dados pessoais de terceiros
 - qualquer informacao sigilosa
@@ -59,9 +67,8 @@ O sistema nao deve exibir:
 Configure no Netlify ou no backend:
 
 ```env
-SERPRO_BASE_URL=
-SERPRO_ACCESS_TOKEN=
-FIPE_PROVIDER=brasilapi
+FIPEAPI_KEY=SUA_CHAVE_FIPEAPI
+FIPEAPI_BASE_URL=https://placas.fipeapi.com.br
 WHATSAPP_NUMBER=5521995947016
 ```
 
@@ -81,4 +88,4 @@ Netlify, usando:
 
 ## Atencao
 
-O endpoint real do SERPRO/SENATRAN deve ser ajustado conforme a documentacao oficial recebida apos contratacao. As credenciais nunca devem ser colocadas no HTML, JavaScript publico ou repositorio GitHub.
+A FipeAPI pode retornar campos como chassi ou numero do motor. O backend foi configurado para nao devolver esses dados ao front-end. A exibicao ao cliente deve ficar limitada aos dados basicos do veiculo e valor FIPE aproximado.
