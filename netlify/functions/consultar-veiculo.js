@@ -23,33 +23,74 @@ function resposta(statusCode, body) {
 }
 
 function filtrarDadosSensiveis(dados) {
+  const fonte = Array.isArray(dados) ? dados[0] || {} : dados || {};
+
   return {
-    plate: dados.placa || dados.plate || null,
-    brand: dados.marca || dados.brand || null,
-    model: dados.modelo || dados.model || null,
-    year_manufacture: dados.anoFabricacao || dados.year_manufacture || null,
-    year_model: dados.anoModelo || dados.year_model || null,
-    color: dados.cor || dados.color || null,
-    category: dados.categoria || dados.category || null,
-    vehicle_type: dados.tipoVeiculo || dados.especie || dados.vehicle_type || null,
-    fuel: dados.combustivel || dados.fuel || null,
-    city: dados.municipio || dados.city || null,
-    state: dados.uf || dados.state || null,
-    situacao_basica: dados.situacaoBasica || dados.situacao_basica || null,
-    restricoes_publicas: dados.restricoesPublicas || dados.restricoes_publicas || null
+    plate: fonte.placa || fonte.plate || null,
+    brand: fonte.marca || fonte.brand || null,
+    model: fonte.modelo || fonte.model || null,
+    year_manufacture: fonte.anoFabricacao || fonte.ano_fabricacao || fonte.year_manufacture || null,
+    year_model: fonte.anoModelo || fonte.ano_modelo || fonte.year_model || null,
+    color: fonte.cor || fonte.color || null,
+    category: fonte.categoria || fonte.category || null,
+    vehicle_type: fonte.tipoVeiculo || fonte.tipo_veiculo || fonte.especie || fonte.vehicle_type || null,
+    fuel: fonte.combustivel || fonte.fuel || null,
+    city: fonte.municipio || fonte.city || null,
+    state: fonte.uf || fonte.state || null,
+    situacao_basica: fonte.situacaoBasica || fonte.situacao_basica || null,
+    restricoes_publicas: fonte.restricoesPublicas || fonte.restricoes_publicas || null
   };
 }
 
-async function consultarSerproSenatran(placa) {
-  const baseUrl = process.env.SERPRO_BASE_URL;
-  const token = process.env.SERPRO_ACCESS_TOKEN;
+async function obterTokenSerpro() {
+  const tokenUrl = process.env.SERPRO_TOKEN_URL || "https://gateway.apiserpro.serpro.gov.br/token";
+  const consumerKey = process.env.SERPRO_CONSUMER_KEY;
+  const consumerSecret = process.env.SERPRO_CONSUMER_SECRET;
+  const accessTokenManual = process.env.SERPRO_ACCESS_TOKEN;
 
-  if (!baseUrl || !token) {
-    throw new Error("SERPRO_NOT_CONFIGURED");
+  if (accessTokenManual) {
+    return accessTokenManual;
   }
 
-  // Ajuste este endpoint conforme a documentacao oficial contratada no SERPRO/SENATRAN.
-  const endpoint = `${baseUrl.replace(/\/$/, "")}/veiculos/placa/${placa}`;
+  if (!consumerKey || !consumerSecret) {
+    throw new Error("SERPRO_AUTH_NOT_CONFIGURED");
+  }
+
+  const basicToken = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
+
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${basicToken}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: "grant_type=client_credentials"
+  });
+
+  if (!response.ok) {
+    throw new Error("SERPRO_TOKEN_ERROR");
+  }
+
+  const data = await response.json();
+
+  if (!data.access_token) {
+    throw new Error("SERPRO_TOKEN_ERROR");
+  }
+
+  return data.access_token;
+}
+
+async function consultarSerproSenatran(placa) {
+  const baseUrl = process.env.SERPRO_VEHICLE_BASE_URL || process.env.SERPRO_BASE_URL;
+  const pathTemplate = process.env.SERPRO_VEHICLE_PATH || "/veiculos/placa/{placa}";
+
+  if (!baseUrl) {
+    throw new Error("SERPRO_ENDPOINT_NOT_CONFIGURED");
+  }
+
+  const token = await obterTokenSerpro();
+  const path = pathTemplate.replace("{placa}", encodeURIComponent(placa));
+  const endpoint = `${baseUrl.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 
   const response = await fetch(endpoint, {
     method: "GET",
@@ -127,11 +168,24 @@ exports.handler = async function(event) {
       }
     });
   } catch (error) {
-    if (error.message === "SERPRO_NOT_CONFIGURED") {
+    const errosConfiguracao = [
+      "SERPRO_AUTH_NOT_CONFIGURED",
+      "SERPRO_ENDPOINT_NOT_CONFIGURED"
+    ];
+
+    if (errosConfiguracao.includes(error.message)) {
       return resposta(500, {
         success: false,
-        error: "SERPRO_NOT_CONFIGURED",
-        message: "Credenciais SERPRO/SENATRAN nao configuradas."
+        error: error.message,
+        message: "Configuracao SERPRO/SENATRAN incompleta. Verifique variaveis de ambiente."
+      });
+    }
+
+    if (error.message === "SERPRO_TOKEN_ERROR") {
+      return resposta(502, {
+        success: false,
+        error: "SERPRO_TOKEN_ERROR",
+        message: "Falha ao autenticar no gateway SERPRO."
       });
     }
 
